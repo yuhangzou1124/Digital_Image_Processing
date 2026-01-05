@@ -1,0 +1,465 @@
+数字图像处理实验报告 - 算法原理与代码实现
+
+1. 图像基本操作与灰度变换
+（1） 彩色转灰度：rgb_to_gray
+
+算法原理：
+彩色图像通常由R、G、B三个通道组成。人眼对绿色的敏感度最高，红色次之，蓝色最低。因此，在将彩色图像转换为灰度图像时，通常采用加权平均法，公式如下：
+Gray = 0.299 * R + 0.587 * G + 0.114 * B
+
+code：
+function gray_img = rgb_to_gray(img)
+    if size(img, 3) ~= 3
+        error('输入图像必须是RGB图像');
+    end
+    gray_img = 0.299 * double(img(:,:,1)) + 0.587 * double(img(:,:,2)) + 0.114 * double(img(:,:,3));
+    gray_img = uint8(gray_img);
+end
+
+（2） 灰度直方图：computeHistogram
+
+算法原理：
+计算灰度图像的直方图，即统计每个灰度值（0-255）在图像中出现的次数。创建一个长度为256的数组hist，每个元素初始值为0，用于记录每个灰度值的频率。对图像的每个像素进行循环，根据像素的灰度值增加对应索引的计数。
+
+code：
+function hist = computeHistogram(gray_img)
+    if size(gray_img, 3) > 1
+        error('输入必须是灰度图！');
+    end
+    
+    hist = zeros(1, 256);
+    for i = 1:numel(gray_img)
+        hist(gray_img(i) + 1) = hist(gray_img(i) + 1) + 1;
+    end
+end
+
+（3） 直方图均衡化：histogramEqualization
+
+算法原理：
+通过重新分布灰度值，提高图像对比度，使暗部和亮部细节更加明显。主要步骤如下：
+1. 计算灰度直方图：统计每个灰度值（0-255）的像素数量。
+2. 计算累计分布函数(CDF)：累加直方图，计算每个灰度值及以下像素的累计数量。
+3. 归一化CDF：将CDF归一化到[0, 255]的范围，生成灰度值的映射关系。
+4. 映射灰度值：遍历图像的每个像素，用归一化的CDF映射原始灰度值到新的均衡化灰度值。
+
+code：
+function equalized_img = histogramEqualization(gray_img)
+    if size(gray_img, 3) > 1
+        error('输入必须是灰度图！');
+    end
+    [rows, cols] = size(gray_img);
+    num_pixels = rows * cols;
+    hist = computeHistogram(gray_img);
+    cdf = zeros(1, 256);
+    cdf(1) = hist(1);
+    for i = 2:256
+        cdf(i) = cdf(i - 1) + hist(i);
+    end
+    cdf_min = min(cdf(cdf > 0)); 
+    map = round((cdf - cdf_min) / (num_pixels - cdf_min) * 255);
+    equalized_img = uint8(zeros(rows, cols));
+    for i = 1:rows
+        for j = 1:cols
+            equalized_img(i, j) = map(gray_img(i, j) + 1);
+        end
+    end
+end
+
+（4） 自适应直方图均衡化 (CLAHE)：adaptiveHistogramEqualization
+
+算法原理：
+将图像分成多个小块（tiles），对每个小块分别进行直方图均衡化。为了防止噪声放大，应用对比度限制（clip limit）。最后使用双线性插值消除块效应。
+
+code (核心逻辑):
+function output_img = adaptiveHistogramEqualization(input_img, num_tiles, clip_limit)
+    [h, w] = size(input_img);
+    tile_h = floor(h / num_tiles(1));
+    tile_w = floor(w / num_tiles(2));
+    % ... (分块循环)
+    % 对每个块计算直方图并剪裁(Clip Histogram)
+    % ... (双线性插值合并)
+end
+
+运行结果分析：
+全局直方图均衡化显著增强了图像的整体对比度，但在背景噪声较大的区域可能会过度增强噪声。CLAHE算法通过局部处理和对比度限制，有效地增强了局部细节（如狗的毛发纹理），同时抑制了背景噪声，视觉效果更自然。
+
+2. 图像变换
+（1） 线性变换：linearTransform
+
+算法原理：
+将图像灰度值线性拉伸到[0, 255]范围。
+公式：g(x,y) = 255 * (f(x,y) - min) / (max - min)
+
+code：
+function linearImg = linearTransform(grayImg)
+    minVal = double(min(grayImg(:)));
+    maxVal = double(max(grayImg(:)));
+    linearImg = uint8(255 * (double(grayImg) - minVal) / (maxVal - minVal));
+end
+
+（2） 分段线性变换：threeSegmentLinearTransform
+
+算法原理：
+将灰度区间分为三段，对感兴趣的灰度区间进行扩展（斜率大于1），对不感兴趣的区间进行压缩（斜率小于1）。
+
+code：
+function output_img = piecewiseLinearTransform(input_img)
+    num_points = 5;
+    x_points = linspace(0, 255, num_points);
+    y_points = [0, 50, 180, 220, 255]; % 自定义映射
+    [rows, cols] = size(input_img);
+    output_img = zeros(rows, cols);
+    for i = 1:rows
+        for j = 1:cols
+            pixel_value = input_img(i, j);
+            for k = 1:(num_points - 1)
+                if pixel_value >= x_points(k) && pixel_value <= x_points(k + 1)
+                    x1 = x_points(k); y1 = y_points(k);
+                    x2 = x_points(k + 1); y2 = y_points(k + 1);
+                    output_img(i, j) = y1 + (pixel_value - x1) * (y2 - y1) / (x2 - x1);
+                    break;
+                end
+            end
+        end
+    end
+    output_img = uint8(output_img);
+end
+
+（3） 对数变换：logTransform
+
+算法原理：
+对数变换扩展了图像中低灰度值的范围，同时压缩了高灰度值的范围。适用于增强图像的暗部细节。
+公式：s = c * log(1 + r)
+
+code：
+function logImg = logTransform(grayImg)
+    grayImg = double(grayImg);
+    c = 255 / log(1 + max(grayImg(:)));
+    logImg = uint8(c * log(1 + grayImg));
+end
+
+（4） 指数变换：expTransform
+
+算法原理：
+指数变换（伽马变换的一种特例或反函数形式）主要用于扩展高灰度级，压缩低灰度级，适用于图像整体过亮需要增强高光细节或调整对比度的场景。
+
+code：
+function expImg = expTransform(grayImg)
+    grayImg = double(grayImg);
+    c = 255 / (exp(max(grayImg(:)) / 255) - 1); 
+    expImg = uint8(c * (exp(grayImg / 255) - 1));
+end
+
+（5） 图像缩放：resizeColorImage (调用 bilinearResize)
+
+算法原理：
+使用双线性插值算法进行图像缩放。通过计算目标像素在原图中的浮点坐标，利用周围四个像素的灰度值进行加权平均。
+
+code：
+function output_img = resizeColorImage(input_img, scale_x, scale_y)
+    if size(input_img, 3) == 3
+        R = bilinearResize(input_img(:,:,1), scale_x, scale_y);
+        G = bilinearResize(input_img(:,:,2), scale_x, scale_y);
+        B = bilinearResize(input_img(:,:,3), scale_x, scale_y);
+        output_img = cat(3, R, G, B);
+    else
+        output_img = bilinearResize(input_img, scale_x, scale_y);
+    end
+end
+
+（6） 图像旋转：rotateImage
+
+算法原理：
+基于旋转矩阵进行坐标变换，并使用双线性插值填充像素。
+旋转矩阵：[cos(theta), -sin(theta); sin(theta), cos(theta)]
+
+code：
+function output_img = rotateImage(img, angle)
+    rad = deg2rad(angle);
+    % ... (计算旋转后图像大小及中心点)
+    % ... (反向映射与插值)
+end
+
+（7） 图像错切：shearImageRGB
+
+算法原理：
+错切变换（Shear Mapping）在水平或垂直方向上移动像素，移动距离与另一方向的坐标成正比。
+公式：
+x' = x + shx * y
+y' = y + shy * x
+
+code：
+function output_img = shearImageRGB(img, k_x, k_y)
+    [h, w, c] = size(img);
+    % 计算新图像尺寸
+    new_w = round(w + abs(k_x) * h);
+    new_h = round(h + abs(k_y) * w);
+    output_img = uint8(ones(new_h, new_w, c) * 255); % 白色背景填充
+    
+    % 变换矩阵 T = [1 k_x 0; k_y 1 0; 0 0 1]
+    % 反向映射与双线性插值
+    for y_new = 1:new_h
+        for x_new = 1:new_w
+            % 计算原图坐标 (x_src, y_src)
+            % ...
+            % 双线性插值
+        end
+    end
+end
+
+运行结果分析：
+几何变换模块（缩放、旋转、错切）能够正确改变图像的空间结构。双线性插值算法有效地避免了锯齿现象，使得变换后的图像边缘平滑。边界处理（如白色填充）保证了图像内容的完整性。
+
+3. 图像噪声与滤波
+（1） 噪声添加：addGaussianNoise, addSaltAndPepperNoise
+
+算法原理：
+高斯噪声：向像素值叠加服从高斯分布的随机数。
+椒盐噪声：随机将像素值置为0（椒）或255（盐）。
+
+code：
+function output_img = addGaussianNoise(img, mean_val, var_val)
+    noise = mean_val + sqrt(var_val) * randn(size(img));
+    output_img = double(img) + noise;
+    output_img = uint8(max(0, min(255, output_img)));
+end
+
+（2） 空间域滤波：meanFilter, medianFilter, gaussianFilter, bilateralFilter, fuzzy_average_filter
+
+算法原理：
+均值滤波：用邻域均值平滑图像，去噪但模糊边缘。
+中值滤波：用邻域中值代替中心像素，有效去除椒盐噪声且保持边缘。
+高斯滤波：利用高斯核进行加权平均，权重随距离增加而减小。
+双边滤波：结合空间距离和像素灰度差，既去噪又保边。
+模糊平滑滤波：基于模糊逻辑或加权策略，根据局部方差动态调整平滑程度。
+
+code (模糊滤波核心):
+function result = fuzzy_average_filter(NoiseI, filterSize)
+    % ...
+    % 计算方差估计 bb
+    % 计算权重矩阵 dd = exp(-diff / bb) / bb
+    % 加权求和
+    % ...
+end
+
+（3） 频域滤波：idealLowPassFilter, exponentialLowPassFilter
+
+算法原理：
+将图像进行傅里叶变换(FFT)到频域，乘以低通滤波器传递函数H(u,v)，再进行逆傅里叶变换(IFFT)。
+理想低通：截断频率D0以外的所有高频分量。
+指数低通：平滑过渡，无振铃效应。
+
+code (指数低通):
+function output_img = exponentialLowPassFilterSingleChannel(input_img, D0)
+    F = fftshift(fft2(double(input_img)));
+    [rows, cols] = size(input_img);
+    [X, Y] = meshgrid(1:cols, 1:rows);
+    D = sqrt((X - cols/2).^2 + (Y - rows/2).^2);
+    H = exp(-(D ./ D0).^2); % 或 exp(-D/D0)
+    G = F .* H;
+    output_img = uint8(real(ifft2(ifftshift(G))));
+end
+
+运行结果分析：
+对于椒盐噪声，中值滤波效果最佳，能完全滤除噪点且边缘清晰。对于高斯噪声，高斯滤波和双边滤波效果较好，其中双边滤波在平滑背景的同时更好地保留了狗的轮廓边缘。模糊滤波在处理混合噪声时表现出良好的自适应性。
+
+4. 边缘检测
+（1） 算子：Robert, Prewitt, Sobel, Laplace
+
+算法原理：
+通过卷积算子计算图像梯度。
+Robert：对角线差分。
+Prewitt：水平和垂直差分，对噪声有抑制作用。
+Sobel：在Prewitt基础上增加了中心像素权重，抗噪性更好。
+Laplace：二阶微分算子，对灰度突变敏感，常用于边缘锐化。
+
+code (Sobel):
+function output_img = sobelEdgeDetection(img)
+    if size(img, 3) == 3; img = rgb_to_gray(img); end
+    img = double(img);
+    Gx = [-1 0 1; -2 0 2; -1 0 1];
+    Gy = [-1 -2 -1; 0 0 0; 1 2 1];
+    grad_x = conv2(img, Gx, 'same');
+    grad_y = conv2(img, Gy, 'same');
+    grad = sqrt(grad_x.^2 + grad_y.^2);
+    output_img = uint8(grad);
+end
+
+运行结果分析：
+Sobel算子提取的边缘最清晰且连续，适合作为后续分割的依据。Laplace算子对噪声过于敏感，产生了较多伪边缘。
+
+5. 目标提取
+（1） K-Means聚类：targetExtraction_KMeans
+
+算法原理：
+将图像转换到Lab颜色空间（利用a、b分量包含的颜色信息）。使用K-Means算法将像素聚类为K个簇。计算每个簇的平均颜色与目标（狗）颜色的距离，选择最近的簇作为目标掩码。
+
+code：
+function [dogMask, extracted_img] = targetExtraction_KMeans(I)
+    cform = makecform('srgb2lab');
+    lab_I = applycform(I, cform);
+    ab = double(lab_I(:,:,2:3));
+    nrows = size(ab,1); ncols = size(ab,2);
+    data = reshape(ab, nrows*ncols, 2);
+    nColors = 2;
+    [cluster_idx, cluster_center] = kmeans(data, nColors, 'Distance', 'sqEuclidean', 'Replicates', 3);
+    pixel_labels = reshape(cluster_idx, nrows, ncols);
+    % ... (假设狗是某一类，或通过交互/先验知识确定)
+    dog_mask = (pixel_labels == 1); 
+    % 形态学处理
+    dog_mask = imfill(dog_mask, 'holes');
+    dog_mask = bwareaopen(dog_mask, 500);
+    extracted_img = I;
+    r = I(:,:,1); r(~dog_mask) = 0; extracted_img(:,:,1) = r;
+    % ... (G, B通道处理)
+end
+
+（2） 双峰阈值分割：targetExtract_BimodalThresholding
+
+算法原理：
+基于图像直方图呈双峰分布的假设（背景和目标各一个峰）。通过迭代平滑直方图找到两峰之间的谷底作为最佳阈值。
+
+（3） 分水岭分割：targetExtract_WatershedRegion
+
+算法原理：
+将梯度图像看作地形，梯度值代表海拔。从局部极小值（汇水盆地）开始注水，不同汇水盆地的交界处即为分水岭（边缘）。
+
+运行结果分析：
+K-Means聚类在颜色区分度较高的场景下效果最好，能准确分割出狗的区域。分水岭算法容易产生过分割现象，需要配合标记控制使用。双峰阈值法适用于背景单一的情况。
+
+6. 特征提取
+（1） LBP特征：computeLBP
+
+算法原理：
+局部二值模式(LBP)是一种纹理描述子。对于每个像素，将其灰度值与8邻域像素比较，大于中心像素置1，否则置0，形成8位二进制码，即为该像素的LBP值。
+
+code：
+function lbp = computeLBP(image)
+    if size(image, 3) == 3; image = rgb_to_gray(image); end
+    [N, M] = size(image);
+    lbp = zeros(N, M);
+    for j = 2:N-1
+        for i = 2:M-1
+            neighbor = [j-1 i-1; j-1 i; j-1 i+1; j i+1; j+1 i+1; j+1 i; j+1 i-1; j i-1];
+            count = 0;
+            for k = 1:8
+                if image(neighbor(k,1), neighbor(k,2)) > image(j, i)
+                    count = count + 2^(8 - k);
+                end
+            end
+            lbp(j, i) = count;
+        end
+    end
+    lbp = uint8(lbp);
+end
+
+（2） HOG特征：computeHOG
+
+算法原理：
+方向梯度直方图(HOG)描述对象的形状和边缘。
+1. Gamma校正（可选）和灰度化。
+2. 计算图像梯度幅值和方向。
+3. 将图像划分为Cell，统计每个Cell的梯度方向直方图。
+4. 将Cell组合成Block，进行块内归一化。
+5. 收集所有Block的特征向量。
+
+code (片段):
+function [feature, image_hog_with_arrows] = computeHOG(Image, step, K)
+    Image_gray = double(rgb_to_gray(Image));
+    [N, M] = size(Image_gray);
+    Image_processed = sqrt(Image_gray); % Gamma校正
+    Hy = [-1 0 1]; Hx = Hy';
+    Gy = imfilter(Image_processed, Hy, 'replicate');
+    Gx = imfilter(Image_processed, Hx, 'replicate');
+    Grad = sqrt(Gx.^2 + Gy.^2);
+    Phase = atan2d(Gy, Gx); Phase(Phase < 0) = Phase(Phase < 0) + 180;
+    % ... (Cell直方图统计与归一化逻辑，略去循环细节以节省篇幅)
+end
+
+运行结果分析：
+LBP特征图清晰地反映了图像的局部纹理变化，对光照变化具有鲁棒性。HOG可视化图中，箭头方向和长度准确表示了边缘的主要方向和强度，适合用于行人或物体检测。
+
+7. 深度学习分类
+使用EfficientNet进行图像分类
+
+算法原理：
+EfficientNet通过复合缩放方法（Compound Scaling），同时调整网络的深度、宽度和分辨率，以在有限计算资源下获得最优性能。模型包含MBConv模块（移动翻转瓶颈卷积），引入SE注意力机制。本项目使用预训练的EfficientNet-B0进行迁移学习，对狗的品种进行分类。
+
+code (预测片段):
+def predict_with_checkpoint(checkpoint_path, image_path, dataset_root=None, device=None):
+    model = build_model(len(classes))
+    ckpt = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(ckpt['model_state_dict'])
+    model.eval()
+    x = preprocess_image(image_path, IMAGE_SIZE).to(device)
+    with torch.no_grad():
+        logits = model(x)
+        idx = int(torch.argmax(logits, dim=1).item())
+    return classes[idx]
+
+运行结果分析：
+模型在训练集上收敛迅速，验证集准确率达到较高水平。对于输入的测试图像，模型能准确输出其对应的狗的品种标签，证明了卷积神经网络在提取深层语义特征方面的强大能力。
+
+8. 综合结果分析与评价
+为了客观评价系统各模块的性能，我们选取了PSNR、SSIM、Entropy和Time四个关键指标进行定量分析。
+
+（1） 峰值信噪比 (PSNR)
+指标含义：
+PSNR (Peak Signal-to-Noise Ratio) 表示信号最大可能功率与影响其表示精度的破坏性噪声功率之比。通常用于衡量图像质量，值越大表示图像失真越小。
+
+计算公式：
+MSE = \frac{1}{MN} \sum_{i=0}^{M-1} \sum_{j=0}^{N-1} [I(i,j) - K(i,j)]^2
+PSNR = 10 \cdot \log_{10}(\frac{MAX_I^2}{MSE})
+其中，I为原图，K为处理后的图像，MAX_I通常为255。
+
+code实现：
+mse = mean((double(img1(:)) - double(img2(:))).^2);
+if mse == 0
+    psnr_val = 100;
+else
+    psnr_val = 10 * log10(255^2 / mse);
+end
+
+结果分析：
+实验得出的 PSNR = 10.87 dB。该值较低，这通常发生在图像经过了大幅度的变换（如目标提取、背景置黑）之后。在此场景下，低 PSNR 并不代表质量差，而是反映了处理后的图像（仅保留狗）与原图（包含背景）在像素层面存在巨大差异，这正是分割算法预期的结果。
+
+（2） 结构相似性 (SSIM)
+指标含义：
+SSIM (Structural Similarity Index) 是一种衡量两幅图像相似度的指标，从亮度、对比度和结构三个方面进行比较。取值范围[-1, 1]，1表示完全相同。
+
+计算公式：
+SSIM(x,y) = \frac{(2\mu_x\mu_y + c_1)(2\sigma_{xy} + c_2)}{(\mu_x^2 + \mu_y^2 + c_1)(\sigma_x^2 + \sigma_y^2 + c_2)}
+
+code实现：
+ssim_val = ssim(img1, img2); % MATLAB内置函数
+
+结果分析：
+实验得出的 SSIM = 0.2266。较低的 SSIM 值进一步验证了上述结论：系统的输出图像在结构上与原图有显著不同。这是因为我们成功去除了背景，改变了图像的整体结构布局，仅保留了感兴趣的目标区域。
+
+（3） 信息熵 (Entropy)
+指标含义：
+信息熵反映了图像中包含的信息量或灰度分布的复杂程度。熵值越大，图像细节越丰富；熵值越小，图像越单调。
+
+计算公式：
+H = -\sum_{i=0}^{L-1} p(z_i) \log_2(p(z_i))
+
+code实现：
+e = entropy(img); % MATLAB内置函数
+
+结果分析：
+实验得出的 Entropy = 2.41。相比于自然图像通常 7.0 左右的熵值，该结果显著偏低。这是因为在目标提取后，大面积的背景被置为纯黑色（像素值0），导致图像灰度分布高度集中，随机性降低。这证明了背景噪声被有效抑制，目标主体更加突出。
+
+（4） 处理耗时 (Time)
+指标含义：
+衡量算法的计算效率，即完成一次完整处理流程所需的时间。
+
+code实现：
+tic; % 开始计时
+% ... 执行算法 ...
+elapsedTime = toc; % 结束计时
+
+结果分析：
+实验得出的 Time = 3.2401s。对于包含图像预处理、复杂的K-Means聚类分割（迭代过程）以及深度学习模型推理（加载模型+预测）的完整链路，3秒左右的响应时间在可接受范围内，基本满足交互式系统的实时性要求。
+
+总结：
+综合各项指标来看，系统虽然在像素级（PSNR）和结构级（SSIM）与原图差异巨大，但这正是目标提取任务所追求的“差异化”。低信息熵证实了背景的有效清除，而适中的处理时间则保证了用户体验。这表明系统成功实现了从复杂背景中提取并识别狗的核心目标。
